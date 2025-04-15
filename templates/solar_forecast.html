@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solar Forecast - Solar Energy Tracker</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .forecast-container {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .location-input {
+            margin-bottom: 20px;
+        }
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin-top: 20px;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="/">Solar Energy Tracker</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/dashboard">Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/solar_forecast">Solar Forecast</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/logout">Logout</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <h2>Solar Radiation Forecast</h2>
+        <div class="forecast-container">
+            <div class="location-input">
+                <div class="row">
+                    <div class="col-md-5">
+                        <label for="latitude" class="form-label">Latitude</label>
+                        <input type="number" class="form-control" id="latitude" step="0.0001" value="12.9716">
+                    </div>
+                    <div class="col-md-5">
+                        <label for="longitude" class="form-label">Longitude</label>
+                        <input type="number" class="form-control" id="longitude" step="0.0001" value="77.5946">
+                    </div>
+                    <div class="col-md-2 d-flex align-items-end">
+                        <button class="btn btn-primary w-100" onclick="fetchForecast()">Get Forecast</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="loading" id="loading">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mt-2">Fetching forecast data...</p>
+            </div>
+
+            <div class="chart-container">
+                <canvas id="forecastChart"></canvas>
+            </div>
+
+            <div class="mt-4">
+                <h4>Forecast Summary</h4>
+                <div id="forecastSummary" class="alert alert-info">
+                    Enter coordinates and click "Get Forecast" to see the solar radiation forecast.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.0/dist/chart.min.js"></script>
+    <script>
+        let forecastChart = null;
+
+        function showLoading() {
+            document.getElementById('loading').style.display = 'block';
+        }
+
+        function hideLoading() {
+            document.getElementById('loading').style.display = 'none';
+        }
+
+        function fetchForecast() {
+            const latitude = document.getElementById('latitude').value;
+            const longitude = document.getElementById('longitude').value;
+
+            showLoading();
+            fetch(`/api/solar_forecast?lat=${latitude}&lon=${longitude}`)
+                .then(response => response.json())
+                .then(data => {
+                    hideLoading();
+                    if (data.status === 'success') {
+                        updateForecastChart(data.forecast);
+                        updateForecastSummary(data.forecast);
+                    } else {
+                        alert('Error fetching forecast: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    hideLoading();
+                    console.error('Error:', error);
+                    alert('Error fetching forecast data');
+                });
+        }
+
+        function updateForecastChart(forecastData) {
+            const ctx = document.getElementById('forecastChart').getContext('2d');
+            const hourly = forecastData.hourly;
+            const labels = hourly.time.map(time => {
+                const date = new Date(time);
+                return date.toLocaleTimeString([], { hour: '2-digit' });
+            });
+
+            if (forecastChart) {
+                forecastChart.destroy();
+            }
+
+            forecastChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Solar Radiation (W/m²)',
+                        data: hourly.shortwave_radiation,
+                        borderColor: 'rgb(255, 159, 64)',
+                        backgroundColor: 'rgba(255, 159, 64, 0.2)',
+                        tension: 0.1,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Solar Radiation (W/m²)'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Time'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateForecastSummary(forecastData) {
+            const hourly = forecastData.hourly;
+            const radiation = hourly.shortwave_radiation;
+            const maxRadiation = Math.max(...radiation);
+            const avgRadiation = radiation.reduce((a, b) => a + b, 0) / radiation.length;
+            
+            const summary = `
+                <strong>Maximum Radiation:</strong> ${maxRadiation.toFixed(2)} W/m²<br>
+                <strong>Average Radiation:</strong> ${avgRadiation.toFixed(2)} W/m²<br>
+                <strong>Forecast Period:</strong> ${new Date(hourly.time[0]).toLocaleDateString()} to ${new Date(hourly.time[hourly.time.length-1]).toLocaleDateString()}
+            `;
+            
+            document.getElementById('forecastSummary').innerHTML = summary;
+        }
+
+        // Fetch forecast on page load
+        document.addEventListener('DOMContentLoaded', fetchForecast);
+    </script>
+</body>
+</html> 

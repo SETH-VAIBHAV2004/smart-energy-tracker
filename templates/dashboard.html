@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Energy Dashboard</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+    />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='styles.css') }}"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+      :root {
+        --primary-color: #2c3e50;
+        --secondary-color: #3498db;
+        --accent-color: #f39c12;
+        --background-color: #f8f9fa;
+        --text-light: #ecf0f1;
+        --text-dark: #2c3e50;
+        --shadow-color: rgba(0, 0, 0, 0.1);
+        --success-color: #2ecc71;
+        --warning-color: #f1c40f;
+        --info-color: #3498db;
+      }
+
+      body {
+        background-color: var(--background-color);
+        color: var(--text-dark);
+      }
+
+      .navbar {
+        background-color: var(--primary-color) !important;
+        box-shadow: 0 2px 10px var(--shadow-color);
+      }
+
+      .navbar-brand {
+        color: var(--text-light) !important;
+        font-weight: 600;
+      }
+
+      .btn-outline-light {
+        color: var(--text-light);
+        border-color: var(--text-light);
+      }
+
+      .btn-outline-light:hover {
+        background-color: var(--text-light);
+        color: var(--primary-color);
+      }
+
+      .dashboard-container {
+        display: grid;
+        grid-template-columns: 1fr 2fr 1fr;
+        gap: 1.5rem;
+        margin-top: 2rem;
+      }
+
+      @media screen and (max-width: 992px) {
+        .dashboard-container {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .section-box {
+        background-color: #fff;
+        padding: 1.5rem;
+        border-radius: 12px;
+        box-shadow: 0 2px 10px var(--shadow-color);
+        margin-bottom: 1.5rem;
+        border: 1px solid rgba(0, 0, 0, 0.05);
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+      }
+
+      .section-box:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 15px var(--shadow-color);
+      }
+
+      details.section {
+        background: #fff;
+        border-radius: 12px;
+        padding: 1rem 1.5rem;
+        box-shadow: 0 2px 8px var(--shadow-color);
+        margin-bottom: 1.5rem;
+        transition: all 0.3s ease;
+        border: 1px solid rgba(0, 0, 0, 0.05);
+      }
+
+      details.section:hover {
+        box-shadow: 0 4px 15px var(--shadow-color);
+      }
+
+      details summary {
+        font-size: 1.1rem;
+        cursor: pointer;
+        list-style: none;
+        color: var(--primary-color);
+        font-weight: 600;
+      }
+
+      details[open] summary::after {
+        content: " ▲";
+      }
+
+      details summary::after {
+        content: " ▼";
+      }
+
+      .dashboard-header {
+        position: relative;
+        height: 200px;
+        overflow: hidden;
+        border-radius: 12px;
+        margin-bottom: 2rem;
+        box-shadow: 0 4px 15px var(--shadow-color);
+      }
+
+      .dashboard-header img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        opacity: 0.8;
+      }
+
+      .dashboard-header-content {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        color: var(--text-light);
+        text-shadow: 2px 2px 4px var(--shadow-color);
+        background: linear-gradient(135deg, rgba(44, 62, 80, 0.8), rgba(52, 152, 219, 0.8));
+      }
+
+      .dashboard-title {
+        font-size: 2.5rem;
+        font-weight: bold;
+        margin-bottom: 0.5rem;
+      }
+
+      .dashboard-subtitle {
+        font-size: 1.2rem;
+      }
+
+      .btn-primary {
+        background-color: var(--secondary-color);
+        border: none;
+        padding: 10px 20px;
+        border-radius: 8px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+      }
+
+      .btn-primary:hover {
+        background-color: #2980b9;
+        transform: scale(1.05);
+      }
+
+      .btn-outline-primary {
+        color: var(--secondary-color);
+        border-color: var(--secondary-color);
+      }
+
+      .btn-outline-primary:hover {
+        background-color: var(--secondary-color);
+        color: white;
+      }
+
+      .bg-info-subtle {
+        background-color: rgba(52, 152, 219, 0.1) !important;
+        border-color: var(--info-color) !important;
+      }
+
+      .bg-warning-subtle {
+        background-color: rgba(241, 196, 15, 0.1) !important;
+        border-color: var(--warning-color) !important;
+      }
+
+      .table {
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .table thead th {
+        background-color: var(--primary-color);
+        color: var(--text-light);
+        border: none;
+      }
+
+      .table tbody tr:hover {
+        background-color: rgba(52, 152, 219, 0.1);
+      }
+
+      .footer {
+        background-color: var(--primary-color);
+        color: var(--text-light);
+        padding: 1.5rem 0;
+        margin-top: 3rem;
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-dark">
+      <div class="container-fluid">
+        <a class="navbar-brand" href="#">Energy Tracker</a>
+        <div class="d-flex">
+          <a href="/solar_forecast" class="btn btn-outline-light me-2">Energy Forecast</a>
+          <button id="logout" class="btn btn-danger">Logout</button>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Main Container -->
+    <div class="container">
+      <div class="dashboard-header">
+        <img src="{{ url_for('static', filename='img2.jpg') }}" alt="Energy Dashboard">
+        <div class="dashboard-header-content">
+          <h1 class="dashboard-title">Welcome, {{ username }}</h1>
+          <p class="dashboard-subtitle">Track and optimize your energy consumption</p>
+        </div>
+      </div>
+
+      <div class="dashboard-container">
+        <!-- LEFT COLUMN -->
+        <div>
+          <div class="section-box">
+            <h5>Date Filter</h5>
+            <div class="mb-3">
+              <label for="start-date">Start Date:</label>
+              <input type="date" id="start-date" class="form-control" />
+            </div>
+            <div class="mb-3">
+              <label for="end-date">End Date:</label>
+              <input type="date" id="end-date" class="form-control" />
+            </div>
+            <button id="filter-btn" class="btn btn-primary w-100">
+              Filter
+            </button>
+          </div>
+
+          <div class="section-box">
+            <h5>Quick Filters</h5>
+            <div class="btn-group w-100" role="group">
+              <button
+                type="button"
+                class="btn btn-outline-primary filter-btn"
+                data-range="7"
+              >
+                Last 7 Days
+              </button>
+              <button
+                type="button"
+                class="btn btn-outline-primary filter-btn"
+                data-range="30"
+              >
+                Last 30 Days
+              </button>
+              <button
+                type="button"
+                class="btn btn-outline-primary filter-btn"
+                data-range="all"
+              >
+                All Time
+              </button>
+            </div>
+          </div>
+
+          <details class="section" open>
+            <summary><strong>Enter Energy Consumption</strong></summary>
+            <div class="mb-3 mt-3">
+              <label for="solar-energy" class="form-label"
+                >Solar Energy (kWh)</label
+              >
+              <input type="number" id="solar-energy" class="form-control" />
+            </div>
+            <div class="mb-3">
+              <label for="electric-energy" class="form-label"
+                >Electric Energy (kWh)</label
+              >
+              <input type="number" id="electric-energy" class="form-control" />
+            </div>
+            <button class="btn btn-primary w-100" id="submit-energy">
+              Submit
+            </button>
+          </details>
+        </div>
+
+        <!-- CENTER COLUMN -->
+        <div>
+          <div class="section-box">
+            <h5>Total Energy Summary</h5>
+            <p>
+              Total Solar Energy:
+              <strong><span id="total-solar">--</span> kWh</strong>
+            </p>
+            <p>
+              Total Electric Energy:
+              <strong><span id="total-electric">--</span> kWh</strong>
+            </p>
+          </div>
+
+          <details class="section" open>
+            <summary><strong>Energy Comparison Chart</strong></summary>
+            <canvas class="mt-3" id="energyChart"></canvas>
+          </details>
+
+          <details class="section" open>
+            <summary><strong>Historical Energy Data</strong></summary>
+            <table class="table table-striped mt-3" id="energy-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Solar Energy (kWh)</th>
+                  <th>Electric Energy (kWh)</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                <!-- Rows populated dynamically -->
+              </tbody>
+            </table>
+          </details>
+        </div>
+
+        <!-- RIGHT COLUMN -->
+        <div>
+          <details class="section bg-info-subtle text-dark" open>
+            <summary><strong>Your Location</strong></summary>
+            <div id="location-info" class="mt-3">
+              <p class="mb-1">City: <span id="user-city">Loading...</span></p>
+              <p class="mb-1">Region: <span id="user-region">Loading...</span></p>
+              <p class="mb-1">Country: <span id="user-country">Loading...</span></p>
+            </div>
+          </details>
+
+          <details class="section bg-warning-subtle text-dark" open>
+            <summary><strong>Energy Usage Tips</strong></summary>
+            <p id="energy-tips-msg" class="mb-0 mt-3">Loading tips...</p>
+          </details>
+
+          <details class="section bg-success-subtle text-dark" open>
+            <summary><strong>Energy Analytics</strong></summary>
+            <div id="analytics-content" class="mt-3">
+              <div class="mb-3">
+                <h6>Current Pattern</h6>
+                <p id="current-pattern">Loading...</p>
+              </div>
+              <div class="mb-3">
+                <h6>Next Hour Prediction</h6>
+                <p id="next-hour-pred">Loading...</p>
+              </div>
+              <div class="mb-3">
+                <h6>Carbon Footprint</h6>
+                <p id="carbon-footprint">Loading...</p>
+              </div>
+              <div class="mb-3">
+                <h6>Energy Cost</h6>
+                <p id="energy-cost">Loading...</p>
+              </div>
+              <div class="mb-3">
+                <h6>Recommendations</h6>
+                <ul id="recommendations" class="list-unstyled">
+                  <li>Loading recommendations...</li>
+                </ul>
+              </div>
+            </div>
+          </details>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer mt-5 text-center py-3">
+      <div>Energy Tracker &copy; 2025</div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        // Fetch analytics
+        fetch("/get_analytics", {
+          method: "GET",
+          credentials: "include",
+        })
+          .then((response) => response.json())
+          .then((data) => {
+            if (data.status === "success" && data.analysis) {
+              const analysis = data.analysis;
+              
+              // Update analytics display with null checks
+              document.getElementById("current-pattern").textContent = 
+                `Current consumption pattern: ${(analysis.current_pattern || 0).toFixed(2)} kWh`;
+              
+              document.getElementById("next-hour-pred").textContent = 
+                `Predicted next hour: ${(analysis.next_hour_prediction || 0).toFixed(2)} kWh`;
+              
+              document.getElementById("carbon-footprint").textContent = 
+                `Total carbon footprint: ${(analysis.carbon_footprint || 0).toFixed(2)} kg CO2`;
+              
+              document.getElementById("energy-cost").textContent = 
+                `Total energy cost: $${(analysis.energy_cost || 0).toFixed(2)}`;
+              
+              // Update recommendations
+              const recommendationsList = document.getElementById("recommendations");
+              recommendationsList.innerHTML = "";
+              
+              // Add carbon recommendations
+              if (analysis.recommendations?.carbon) {
+                analysis.recommendations.carbon.forEach(rec => {
+                  const li = document.createElement("li");
+                  li.textContent = rec;
+                  recommendationsList.appendChild(li);
+                });
+              }
+              
+              // Add cost recommendations
+              if (analysis.recommendations?.cost) {
+                analysis.recommendations.cost.forEach(rec => {
+                  const li = document.createElement("li");
+                  li.textContent = rec;
+                  recommendationsList.appendChild(li);
+                });
+              }
+            } else {
+              document.getElementById("analytics-content").innerHTML = 
+                '<p class="text-danger">Unable to fetch analytics data.</p>';
+            }
+          })
+          .catch((error) => {
+            document.getElementById("analytics-content").innerHTML = 
+              '<p class="text-danger">Error loading analytics data.</p>';
+            console.error("Analytics fetch error:", error);
+          });
+
+        // Fetch totals
+        fetch("/compare", {
+          method: "GET",
+          credentials: "include",
+        })
+          .then((response) => response.json())
+          .then((data) => {
+            if (data.status === "success") {
+              document.getElementById("total-solar").textContent =
+                data.solar_total.toFixed(2);
+              document.getElementById("total-electric").textContent =
+                data.electric_total.toFixed(2);
+            }
+          })
+          .catch((error) => {
+            console.error("Error fetching energy totals:", error);
+          });
+
+        // Fetch tips
+        fetch("/energy_tips", {
+          method: "GET",
+          credentials: "include",
+        })
+          .then((response) => response.json())
+          .then((data) => {
+            if (data.status === "success") {
+              document.getElementById("energy-tips-msg").textContent = data.tip;
+            } else {
+              document.getElementById("energy-tips-msg").textContent =
+                "Unable to fetch tips.";
+            }
+          })
+          .catch((error) => {
+            document.getElementById("energy-tips-msg").textContent =
+              "Error loading tips.";
+            console.error("Energy tips fetch error:", error);
+          });
+
+        // Fetch location data
+        fetch("/api/geolocation", {
+          method: "GET",
+          credentials: "include",
+        })
+          .then((response) => response.json())
+          .then((data) => {
+            if (data.status === "success") {
+              document.getElementById("user-city").textContent = data.data.city;
+              document.getElementById("user-region").textContent = data.data.region;
+              document.getElementById("user-country").textContent = data.data.country;
+              
+              // Update solar forecast link with user's coordinates
+              const solarForecastLink = document.querySelector('a[href="/solar_forecast"]');
+              if (solarForecastLink && data.data.loc) {
+                solarForecastLink.href = `/solar_forecast?lat=${data.data.loc.split(',')[0]}&lon=${data.data.loc.split(',')[1]}`;
+              }
+            } else {
+              document.getElementById("location-info").innerHTML = 
+                '<p class="text-danger">Unable to fetch location data.</p>';
+            }
+          })
+          .catch((error) => {
+            document.getElementById("location-info").innerHTML = 
+              '<p class="text-danger">Error loading location data.</p>';
+            console.error("Location fetch error:", error);
+          });
+      });
+    </script>
+  </body>
+</html>
