@@ -480,18 +480,32 @@ def delete_entry():
     if 'user_id' not in session:
         return jsonify({'status': 'fail', 'message': 'Unauthorized'}), 401
 
-    data = request.get_json()
-    entry_id = data.get("id")
+    try:
+        data = request.get_json()
+        entry_id = data.get("id")
 
-    if not entry_id:
-        return jsonify({'status': 'fail', 'message': 'Missing entry ID'}), 400
+        if not entry_id:
+            return jsonify({'status': 'fail', 'message': 'Missing entry ID'}), 400
 
-    with sqlite3.connect("solar_energy.db") as conn:
+        conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM energy_data WHERE id = ? AND user_id = ?", (entry_id, session["user_id"]))
+        
+        if os.environ.get('DATABASE_URL'):
+            cursor.execute("DELETE FROM energy_data WHERE id = %s AND user_id = %s", (entry_id, session["user_id"]))
+        else:
+            cursor.execute("DELETE FROM energy_data WHERE id = ? AND user_id = ?", (entry_id, session["user_id"]))
+            
         conn.commit()
+        conn.close()
 
-    return jsonify({'status': 'success', 'message': 'Entry deleted'})
+        return jsonify({'status': 'success', 'message': 'Entry deleted'})
+
+    except Exception as e:
+        logger.error(f"Error in delete_entry: {str(e)}")
+        if conn:
+            conn.rollback()
+            conn.close()
+        return jsonify({'status': 'fail', 'message': 'Error deleting entry'}), 500
 
 # Compare Total Energy
 @app.route('/compare', methods=['GET'])
