@@ -6,6 +6,8 @@ from datetime import datetime, timedelta
 import requests  # ✅ Added for API calls
 import json
 from analytics.energy_analytics import EnergyAnalyticsSystem
+import psycopg2
+from urllib.parse import urlparse
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key_here'
@@ -13,10 +15,57 @@ app.secret_key = 'your_secret_key_here'
 # Initialize analytics system
 analytics_system = EnergyAnalyticsSystem()
 
+# Database configuration
+def get_db_connection():
+    if os.environ.get('DATABASE_URL'):
+        # Production - PostgreSQL
+        result = urlparse(os.environ.get('DATABASE_URL'))
+        username = result.username
+        password = result.password
+        database = result.path[1:]
+        hostname = result.hostname
+        port = result.port
+        
+        conn = psycopg2.connect(
+            database=database,
+            user=username,
+            password=password,
+            host=hostname,
+            port=port
+        )
+    else:
+        # Development - SQLite
+        conn = sqlite3.connect('solar_energy.db')
+        conn.row_factory = sqlite3.Row
+    return conn
+
 # Database Setup
 def init_db():
-    with sqlite3.connect('solar_energy.db') as conn:
-        cursor = conn.cursor()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    if os.environ.get('DATABASE_URL'):
+        # PostgreSQL tables
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                username TEXT NOT NULL UNIQUE,
+                password TEXT NOT NULL
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS energy_data (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id),
+                date TEXT,
+                solar_energy REAL,
+                electric_energy REAL,
+                temperature REAL,
+                humidity REAL
+            )
+        ''')
+    else:
+        # SQLite tables
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,8 +94,9 @@ def init_db():
             cursor.execute("ALTER TABLE energy_data ADD COLUMN temperature REAL DEFAULT 25")
         if 'humidity' not in columns:
             cursor.execute("ALTER TABLE energy_data ADD COLUMN humidity REAL DEFAULT 60")
-            
-        conn.commit()
+    
+    conn.commit()
+    conn.close()
 
 # Index Route
 @app.route('/')
@@ -64,13 +114,14 @@ def register():
         password = generate_password_hash(data.get('password'))
 
         try:
-            with sqlite3.connect('solar_energy.db') as conn:
-                cursor = conn.cursor()
-                cursor.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, password))
-                conn.commit()
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("INSERT INTO users (username, password) VALUES (%s, %s)", (username, password))
+            conn.commit()
+            conn.close()
             return jsonify({'status': 'success', 'message': 'User registered successfully'})
-        except sqlite3.IntegrityError:
-            return jsonify({'status': 'fail', 'message': 'Username already exists'})
+        except Exception as e:
+            return jsonify({'status': 'fail', 'message': str(e)})
 
 # User Login
 @app.route('/login', methods=['POST'])
@@ -114,16 +165,17 @@ def add_energy():
     date = data['date']
     solar_energy = data['solar_energy']
     electric_energy = data['electric_energy']
-    temperature = data.get('temperature', 25)  # Default temperature
-    humidity = data.get('humidity', 60)        # Default humidity
+    temperature = data.get('temperature', 25)
+    humidity = data.get('humidity', 60)
 
-    with sqlite3.connect('solar_energy.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO energy_data (user_id, date, solar_energy, electric_energy, temperature, humidity)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (session['user_id'], date, solar_energy, electric_energy, temperature, humidity))
-        conn.commit()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO energy_data (user_id, date, solar_energy, electric_energy, temperature, humidity)
+        VALUES (%s, %s, %s, %s, %s, %s)
+    ''', (session['user_id'], date, solar_energy, electric_energy, temperature, humidity))
+    conn.commit()
+    conn.close()
 
     return jsonify({'status': 'success', 'message': 'Energy data added'})
 
@@ -412,4 +464,4 @@ def get_geolocation():
 
 if __name__ == '__main__':
     init_db()
-    app.run(debug=True)
+    app.run()

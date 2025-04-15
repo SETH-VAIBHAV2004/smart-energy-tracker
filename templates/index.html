@@ -12,6 +12,7 @@
       rel="stylesheet"
       href="{{ url_for('static', filename='styles.css') }}"
     />
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='img1.jpeg') }}">
     <style>
       body {
         background: linear-gradient(135deg, #1e3c72, #2a5298);
@@ -103,6 +104,9 @@
         margin-bottom: 2rem;
       }
     </style>
+    <script>
+      const API_BASE_URL = window.location.origin;
+    </script>
   </head>
   <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
