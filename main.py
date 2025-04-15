@@ -27,12 +27,6 @@ CORS(app, resources={
     }
 })
 
-# Initialize analytics system
-analytics_system = EnergyAnalyticsSystem()
-
-# Initialize database
-init_db()
-
 # Database configuration
 def get_db_connection():
     if os.environ.get('DATABASE_URL'):
@@ -133,6 +127,12 @@ def init_db():
     finally:
         if conn:
             conn.close()
+
+# Initialize analytics system
+analytics_system = EnergyAnalyticsSystem()
+
+# Initialize database
+init_db()
 
 # Index Route
 @app.route('/')
