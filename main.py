@@ -9,6 +9,11 @@ from analytics.energy_analytics import EnergyAnalyticsSystem
 import psycopg2
 from urllib.parse import urlparse
 from flask_cors import CORS  # Add this import
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key_here'
@@ -146,21 +151,34 @@ def register():
 # User Login
 @app.route('/login', methods=['POST'])
 def login():
-    data = request.get_json()
-    username = data['username']
-    password = data['password']
+    try:
+        data = request.get_json()
+        username = data['username']
+        password = data['password']
 
-    with sqlite3.connect('solar_energy.db') as conn:
+        conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT id, password FROM users WHERE username=?", (username,))
+        
+        if os.environ.get('DATABASE_URL'):
+            # PostgreSQL query
+            cursor.execute("SELECT id, password FROM users WHERE username = %s", (username,))
+        else:
+            # SQLite query
+            cursor.execute("SELECT id, password FROM users WHERE username = ?", (username,))
+            
         user = cursor.fetchone()
+        conn.close()
 
-    if user and check_password_hash(user[1], password):
-        session['user_id'] = user[0]
-        session['username'] = username
-        return jsonify({'status': 'success'})
-    else:
-        return jsonify({'status': 'fail', 'message': 'Invalid credentials'})
+        if user and check_password_hash(user[1], password):
+            session['user_id'] = user[0]
+            session['username'] = username
+            return jsonify({'status': 'success'})
+        else:
+            return jsonify({'status': 'fail', 'message': 'Invalid credentials'})
+            
+    except Exception as e:
+        logger.error(f"Login error: {str(e)}")
+        return jsonify({'status': 'fail', 'message': str(e)}), 500
 
 # Logout
 @app.route('/logout')
@@ -207,13 +225,13 @@ def add_energy():
 
         try:
             conn = get_db_connection()
-            app.logger.info("Database connection established")
+            logger.info("Database connection established")
             
             cursor = conn.cursor()
-            app.logger.info("Cursor created")
+            logger.info("Cursor created")
             
             # Log the values being inserted
-            app.logger.info(f"Inserting values: user_id={session['user_id']}, date={date}, solar={solar_energy}, electric={electric_energy}")
+            logger.info(f"Inserting values: user_id={session['user_id']}, date={date}, solar={solar_energy}, electric={electric_energy}")
             
             # Use the execute_query helper function
             if os.environ.get('DATABASE_URL'):
@@ -232,9 +250,9 @@ def add_energy():
                 ''', (session['user_id'], date, solar_energy, electric_energy, temperature, humidity))
                 inserted_id = cursor.lastrowid
             
-            app.logger.info("Query executed successfully")
+            logger.info("Query executed successfully")
             conn.commit()
-            app.logger.info("Transaction committed")
+            logger.info("Transaction committed")
             
             return jsonify({
                 'status': 'success', 
@@ -243,16 +261,16 @@ def add_energy():
             })
             
         except Exception as e:
-            app.logger.error(f"Database error in add_energy: {str(e)}")
-            app.logger.error(f"Error type: {type(e).__name__}")
+            logger.error(f"Database error in add_energy: {str(e)}")
+            logger.error(f"Error type: {type(e).__name__}")
             if hasattr(e, 'pgcode'):
-                app.logger.error(f"PostgreSQL error code: {e.pgcode}")
+                logger.error(f"PostgreSQL error code: {e.pgcode}")
             if hasattr(e, 'pgerror'):
-                app.logger.error(f"PostgreSQL error message: {e.pgerror}")
+                logger.error(f"PostgreSQL error message: {e.pgerror}")
             
             if conn:
                 conn.rollback()
-                app.logger.info("Transaction rolled back")
+                logger.info("Transaction rolled back")
             
             return jsonify({
                 'status': 'fail', 
@@ -265,11 +283,11 @@ def add_energy():
                 cursor.close()
             if conn:
                 conn.close()
-                app.logger.info("Database connection closed")
+                logger.info("Database connection closed")
 
     except Exception as e:
-        app.logger.error(f"Error in add_energy: {str(e)}")
-        app.logger.error(f"Error type: {type(e).__name__}")
+        logger.error(f"Error in add_energy: {str(e)}")
+        logger.error(f"Error type: {type(e).__name__}")
         return jsonify({
             'status': 'fail', 
             'message': f'Server error: {str(e)}',
@@ -320,7 +338,7 @@ def get_energy_data():
         return jsonify({'status': 'success', 'data': energy_data})
 
     except Exception as e:
-        app.logger.error(f"Error in get_energy_data: {str(e)}")
+        logger.error(f"Error in get_energy_data: {str(e)}")
         return jsonify({'status': 'fail', 'message': 'Error retrieving energy data'}), 500
 
 # Get Analytics
@@ -376,7 +394,7 @@ def get_analytics():
         })
 
     except Exception as e:
-        app.logger.error(f"Analytics error: {str(e)}")
+        logger.error(f"Analytics error: {str(e)}")
         return jsonify({
             'status': 'success',
             'analysis': {
