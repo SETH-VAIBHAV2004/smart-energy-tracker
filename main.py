@@ -10,6 +10,8 @@ import psycopg2
 from urllib.parse import urlparse
 from flask_cors import CORS  # Add this import
 import logging
+import threading
+import time
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -26,6 +28,28 @@ CORS(app, resources={
         "allow_headers": ["Content-Type", "Authorization"]
     }
 })
+
+# Keep-alive endpoint
+@app.route('/keep-alive')
+def keep_alive():
+    return jsonify({'status': 'alive'})
+
+# Background task to keep the app alive
+def keep_alive_task():
+    while True:
+        try:
+            # Ping the app every 5 minutes
+            requests.get('https://smart-energy-tracker.onrender.com/keep-alive')
+            logger.info("Keep-alive ping sent")
+        except Exception as e:
+            logger.error(f"Keep-alive ping failed: {str(e)}")
+        time.sleep(300)  # Sleep for 5 minutes
+
+# Start the keep-alive task in a separate thread
+if os.environ.get('RENDER'):
+    keep_alive_thread = threading.Thread(target=keep_alive_task)
+    keep_alive_thread.daemon = True
+    keep_alive_thread.start()
 
 # Database configuration
 def get_db_connection():
@@ -316,23 +340,42 @@ def get_energy_data():
         from_date = request.args.get('from_date')
         to_date = request.args.get('to_date')
 
-        with sqlite3.connect('solar_energy.db') as conn:
-            cursor = conn.cursor()
-            if from_date and to_date:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        if from_date and to_date:
+            if os.environ.get('DATABASE_URL'):
                 cursor.execute('''
                     SELECT id, date, solar_energy, electric_energy, temperature, humidity
                     FROM energy_data
-                    WHERE user_id=? AND date BETWEEN ? AND ?
+                    WHERE user_id = %s AND date BETWEEN %s AND %s
                     ORDER BY date
                 ''', (user_id, from_date, to_date))
             else:
                 cursor.execute('''
                     SELECT id, date, solar_energy, electric_energy, temperature, humidity
                     FROM energy_data
-                    WHERE user_id=?
+                    WHERE user_id = ? AND date BETWEEN ? AND ?
+                    ORDER BY date
+                ''', (user_id, from_date, to_date))
+        else:
+            if os.environ.get('DATABASE_URL'):
+                cursor.execute('''
+                    SELECT id, date, solar_energy, electric_energy, temperature, humidity
+                    FROM energy_data
+                    WHERE user_id = %s
                     ORDER BY date
                 ''', (user_id,))
-            data = cursor.fetchall()
+            else:
+                cursor.execute('''
+                    SELECT id, date, solar_energy, electric_energy, temperature, humidity
+                    FROM energy_data
+                    WHERE user_id = ?
+                    ORDER BY date
+                ''', (user_id,))
+                
+        data = cursor.fetchall()
+        conn.close()
 
         # Convert to list of dictionaries
         energy_data = []
@@ -443,89 +486,125 @@ def delete_entry():
 @app.route('/compare', methods=['GET'])
 def compare():
     if 'user_id' not in session:
-        return jsonify({'status': 'fail', 'message': 'User not logged in'})
+        return jsonify({'status': 'fail', 'message': 'Unauthorized'}), 401
 
-    with sqlite3.connect('solar_energy.db') as conn:
+    try:
+        conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('''
-            SELECT SUM(solar_energy), SUM(electric_energy)
-            FROM energy_data
-            WHERE user_id=?
-        ''', (session['user_id'],))
+        
+        if os.environ.get('DATABASE_URL'):
+            cursor.execute('''
+                SELECT SUM(solar_energy), SUM(electric_energy)
+                FROM energy_data
+                WHERE user_id = %s
+            ''', (session['user_id'],))
+        else:
+            cursor.execute('''
+                SELECT SUM(solar_energy), SUM(electric_energy)
+                FROM energy_data
+                WHERE user_id = ?
+            ''', (session['user_id'],))
+            
         result = cursor.fetchone()
+        conn.close()
 
-    return jsonify({
-        'status': 'success',
-        'solar_total': result[0] or 0,
-        'electric_total': result[1] or 0
-    })
+        return jsonify({
+            'status': 'success',
+            'solar_total': result[0] or 0,
+            'electric_total': result[1] or 0
+        })
+
+    except Exception as e:
+        logger.error(f"Error in compare: {str(e)}")
+        return jsonify({'status': 'fail', 'message': 'Error comparing energy totals'}), 500
 
 # Energy Usage Tips
 @app.route('/energy_tips', methods=['GET'])
 def energy_tips():
     if 'user_id' not in session:
-        return jsonify({'status': 'fail', 'message': 'User not logged in'}), 401
+        return jsonify({'status': 'fail', 'message': 'Unauthorized'}), 401
 
-    user_id = session['user_id']
-    today = datetime.now().date()
-    start_of_this_week = today - timedelta(days=today.weekday())
-    start_of_last_week = start_of_this_week - timedelta(weeks=1)
-    end_of_last_week = start_of_this_week - timedelta(days=1)
-
-    # Get user's location
     try:
-        ip = request.remote_addr
-        if ip == '127.0.0.1':  # For local development
-            ip = requests.get('https://api.ipify.org').text
-        location_response = requests.get(f'https://ipinfo.io/{ip}/json')
-        location_data = location_response.json() if location_response.status_code == 200 else {}
-    except:
-        location_data = {}
+        user_id = session['user_id']
+        today = datetime.now().date()
+        start_of_this_week = today - timedelta(days=today.weekday())
+        start_of_last_week = start_of_this_week - timedelta(weeks=1)
+        end_of_last_week = start_of_this_week - timedelta(days=1)
 
-    with sqlite3.connect('solar_energy.db') as conn:
+        # Get user's location
+        try:
+            ip = request.remote_addr
+            if ip == '127.0.0.1':  # For local development
+                ip = requests.get('https://api.ipify.org').text
+            location_response = requests.get(f'https://ipinfo.io/{ip}/json')
+            location_data = location_response.json() if location_response.status_code == 200 else {}
+        except:
+            location_data = {}
+
+        conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('''
-            SELECT SUM(electric_energy) FROM energy_data
-            WHERE user_id=? AND date BETWEEN ? AND ?
-        ''', (user_id, str(start_of_last_week), str(end_of_last_week)))
-        last_week_total = cursor.fetchone()[0] or 0
+        
+        if os.environ.get('DATABASE_URL'):
+            cursor.execute('''
+                SELECT SUM(electric_energy) FROM energy_data
+                WHERE user_id = %s AND date BETWEEN %s AND %s
+            ''', (user_id, str(start_of_last_week), str(end_of_last_week)))
+            last_week_total = cursor.fetchone()[0] or 0
 
-        cursor.execute('''
-            SELECT SUM(electric_energy) FROM energy_data
-            WHERE user_id=? AND date BETWEEN ? AND ?
-        ''', (user_id, str(start_of_this_week), str(today)))
-        this_week_total = cursor.fetchone()[0] or 0
-
-    # Base message
-    if last_week_total == 0:
-        message = "Start tracking your electricity usage to get personalized tips!"
-    else:
-        change_percent = ((this_week_total - last_week_total) / last_week_total) * 100
-        if change_percent > 10:
-            message = f"You used {change_percent:.1f}% more grid power than last week. Try reducing usage by turning off appliances when not needed."
-        elif change_percent < -10:
-            message = f"Great job! You reduced your grid power usage by {abs(change_percent):.1f}% compared to last week."
+            cursor.execute('''
+                SELECT SUM(electric_energy) FROM energy_data
+                WHERE user_id = %s AND date BETWEEN %s AND %s
+            ''', (user_id, str(start_of_this_week), str(today)))
+            this_week_total = cursor.fetchone()[0] or 0
         else:
-            message = "Your electricity usage is consistent with last week. Keep monitoring for better savings."
+            cursor.execute('''
+                SELECT SUM(electric_energy) FROM energy_data
+                WHERE user_id = ? AND date BETWEEN ? AND ?
+            ''', (user_id, str(start_of_last_week), str(end_of_last_week)))
+            last_week_total = cursor.fetchone()[0] or 0
 
-    # Add location-specific tips
-    if location_data:
-        city = location_data.get('city', '').lower()
-        country = location_data.get('country', '').lower()
-        
-        # Add regional tips
-        if 'india' in country:
-            message += " In India, consider using solar water heaters and LED lighting for better energy efficiency."
-        elif 'usa' in country:
-            message += " In the US, check for local solar incentives and tax credits to maximize your savings."
-        
-        # Add city-specific tips
-        if 'bangalore' in city:
-            message += " Bangalore has good solar potential - consider installing solar panels on your rooftop."
-        elif 'mumbai' in city:
-            message += " Mumbai's coastal climate is great for solar energy - take advantage of the abundant sunlight."
+            cursor.execute('''
+                SELECT SUM(electric_energy) FROM energy_data
+                WHERE user_id = ? AND date BETWEEN ? AND ?
+            ''', (user_id, str(start_of_this_week), str(today)))
+            this_week_total = cursor.fetchone()[0] or 0
+            
+        conn.close()
 
-    return jsonify({'status': 'success', 'tip': message})
+        # Base message
+        if last_week_total == 0:
+            message = "Start tracking your electricity usage to get personalized tips!"
+        else:
+            change_percent = ((this_week_total - last_week_total) / last_week_total) * 100
+            if change_percent > 10:
+                message = f"You used {change_percent:.1f}% more grid power than last week. Try reducing usage by turning off appliances when not needed."
+            elif change_percent < -10:
+                message = f"Great job! You reduced your grid power usage by {abs(change_percent):.1f}% compared to last week."
+            else:
+                message = "Your electricity usage is consistent with last week. Keep monitoring for better savings."
+
+        # Add location-specific tips
+        if location_data:
+            city = location_data.get('city', '').lower()
+            country = location_data.get('country', '').lower()
+            
+            # Add regional tips
+            if 'india' in country:
+                message += " In India, consider using solar water heaters and LED lighting for better energy efficiency."
+            elif 'usa' in country:
+                message += " In the US, check for local solar incentives and tax credits to maximize your savings."
+            
+            # Add city-specific tips
+            if 'bangalore' in city:
+                message += " Bangalore has good solar potential - consider installing solar panels on your rooftop."
+            elif 'mumbai' in city:
+                message += " Mumbai's coastal climate is great for solar energy - take advantage of the abundant sunlight."
+
+        return jsonify({'status': 'success', 'tip': message})
+
+    except Exception as e:
+        logger.error(f"Error in energy_tips: {str(e)}")
+        return jsonify({'status': 'fail', 'message': 'Error generating energy tips'}), 500
 
 # ✅ NEW: Solar Forecast Route
 @app.route('/solar_forecast', methods=['GET'])
@@ -590,3 +669,4 @@ def get_geolocation():
 
 if __name__ == '__main__':
     app.run()
+
