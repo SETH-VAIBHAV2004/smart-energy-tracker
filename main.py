@@ -403,15 +403,26 @@ def get_analytics():
 
     try:
         # Get energy data
-        with sqlite3.connect('solar_energy.db') as conn:
-            cursor = conn.cursor()
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        if os.environ.get('DATABASE_URL'):
             cursor.execute('''
                 SELECT date, solar_energy, electric_energy, temperature, humidity
                 FROM energy_data
-                WHERE user_id=?
+                WHERE user_id = %s
                 ORDER BY date
             ''', (session['user_id'],))
-            rows = cursor.fetchall()
+        else:
+            cursor.execute('''
+                SELECT date, solar_energy, electric_energy, temperature, humidity
+                FROM energy_data
+                WHERE user_id = ?
+                ORDER BY date
+            ''', (session['user_id'],))
+            
+        rows = cursor.fetchall()
+        conn.close()
 
         if not rows:
             return jsonify({
