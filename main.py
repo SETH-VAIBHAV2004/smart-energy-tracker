@@ -8,9 +8,19 @@ import json
 from analytics.energy_analytics import EnergyAnalyticsSystem
 import psycopg2
 from urllib.parse import urlparse
+from flask_cors import CORS  # Add this import
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key_here'
+
+# Enable CORS for all routes
+CORS(app, resources={
+    r"/*": {
+        "origins": ["https://smart-energy-tracker.onrender.com", "http://localhost:5000"],
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"]
+    }
+})
 
 # Initialize analytics system
 analytics_system = EnergyAnalyticsSystem()
@@ -38,6 +48,16 @@ def get_db_connection():
         conn = sqlite3.connect('solar_energy.db')
         conn.row_factory = sqlite3.Row
     return conn
+
+def execute_query(cursor, query, params):
+    """Execute a query with the appropriate parameter style based on the database type."""
+    if os.environ.get('DATABASE_URL'):
+        # PostgreSQL style
+        return cursor.execute(query, params)
+    else:
+        # SQLite style - convert %s to ?
+        sqlite_query = query.replace('%s', '?')
+        return cursor.execute(sqlite_query, params)
 
 # Database Setup
 def init_db():
@@ -159,25 +179,102 @@ def dashboard():
 @app.route('/add_energy', methods=['POST'])
 def add_energy():
     if 'user_id' not in session:
-        return jsonify({'status': 'fail', 'message': 'User not logged in'})
+        return jsonify({'status': 'fail', 'message': 'User not logged in'}), 401
 
-    data = request.get_json()
-    date = data['date']
-    solar_energy = data['solar_energy']
-    electric_energy = data['electric_energy']
-    temperature = data.get('temperature', 25)
-    humidity = data.get('humidity', 60)
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'status': 'fail', 'message': 'No data provided'}), 400
 
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT INTO energy_data (user_id, date, solar_energy, electric_energy, temperature, humidity)
-        VALUES (%s, %s, %s, %s, %s, %s)
-    ''', (session['user_id'], date, solar_energy, electric_energy, temperature, humidity))
-    conn.commit()
-    conn.close()
+        date = data.get('date')
+        solar_energy = data.get('solar_energy')
+        electric_energy = data.get('electric_energy')
+        temperature = data.get('temperature', 25)
+        humidity = data.get('humidity', 60)
 
-    return jsonify({'status': 'success', 'message': 'Energy data added'})
+        # Validate required fields
+        if not all([date, solar_energy is not None, electric_energy is not None]):
+            return jsonify({'status': 'fail', 'message': 'Missing required fields'}), 400
+
+        # Convert to float and validate
+        try:
+            solar_energy = float(solar_energy)
+            electric_energy = float(electric_energy)
+            temperature = float(temperature)
+            humidity = float(humidity)
+        except (TypeError, ValueError):
+            return jsonify({'status': 'fail', 'message': 'Invalid numeric values'}), 400
+
+        try:
+            conn = get_db_connection()
+            app.logger.info("Database connection established")
+            
+            cursor = conn.cursor()
+            app.logger.info("Cursor created")
+            
+            # Log the values being inserted
+            app.logger.info(f"Inserting values: user_id={session['user_id']}, date={date}, solar={solar_energy}, electric={electric_energy}")
+            
+            # Use the execute_query helper function
+            if os.environ.get('DATABASE_URL'):
+                # PostgreSQL query with RETURNING clause
+                execute_query(cursor, '''
+                    INSERT INTO energy_data (user_id, date, solar_energy, electric_energy, temperature, humidity)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                ''', (session['user_id'], date, solar_energy, electric_energy, temperature, humidity))
+                inserted_id = cursor.fetchone()[0]
+            else:
+                # SQLite query
+                execute_query(cursor, '''
+                    INSERT INTO energy_data (user_id, date, solar_energy, electric_energy, temperature, humidity)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                ''', (session['user_id'], date, solar_energy, electric_energy, temperature, humidity))
+                inserted_id = cursor.lastrowid
+            
+            app.logger.info("Query executed successfully")
+            conn.commit()
+            app.logger.info("Transaction committed")
+            
+            return jsonify({
+                'status': 'success', 
+                'message': 'Energy data added',
+                'id': inserted_id
+            })
+            
+        except Exception as e:
+            app.logger.error(f"Database error in add_energy: {str(e)}")
+            app.logger.error(f"Error type: {type(e).__name__}")
+            if hasattr(e, 'pgcode'):
+                app.logger.error(f"PostgreSQL error code: {e.pgcode}")
+            if hasattr(e, 'pgerror'):
+                app.logger.error(f"PostgreSQL error message: {e.pgerror}")
+            
+            if conn:
+                conn.rollback()
+                app.logger.info("Transaction rolled back")
+            
+            return jsonify({
+                'status': 'fail', 
+                'message': f'Database error: {str(e)}',
+                'error_type': type(e).__name__
+            }), 500
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                app.logger.info("Database connection closed")
+
+    except Exception as e:
+        app.logger.error(f"Error in add_energy: {str(e)}")
+        app.logger.error(f"Error type: {type(e).__name__}")
+        return jsonify({
+            'status': 'fail', 
+            'message': f'Server error: {str(e)}',
+            'error_type': type(e).__name__
+        }), 500
 
 # Get Energy Data
 @app.route('/get_energy_data', methods=['GET'])

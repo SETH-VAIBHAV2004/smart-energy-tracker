@@ -111,16 +111,26 @@ document.addEventListener("DOMContentLoaded", function () {
         });
 
         const data = await response.json();
-        if (response.ok && data.status === "success") {
-          console.log("Energy data submitted successfully");
+        
+        if (!response.ok) {
+          console.error("Server error details:", data);
+          throw new Error(data.message || `Server error: ${response.status}`);
+        }
+
+        if (data.status === "success") {
+          alert("Energy data submitted successfully!");
+          // Clear the form
+          document.getElementById("solar-energy").value = "";
+          document.getElementById("electric-energy").value = "";
+          // Refresh the data
           await fetchEnergyData(currentRange);
-          // Analytics will be fetched by fetchEnergyData
         } else {
+          console.error("Error response:", data);
           throw new Error(data.message || "Failed to submit energy data");
         }
       } catch (error) {
         console.error("Submit energy error:", error);
-        alert("Failed to submit energy data: " + error.message);
+        alert(`Error: ${error.message}\n\nPlease try again or contact support if the problem persists.`);
       }
     });
   }
