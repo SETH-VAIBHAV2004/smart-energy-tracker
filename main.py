@@ -30,6 +30,9 @@ CORS(app, resources={
 # Initialize analytics system
 analytics_system = EnergyAnalyticsSystem()
 
+# Initialize database
+init_db()
+
 # Database configuration
 def get_db_connection():
     if os.environ.get('DATABASE_URL'):
@@ -66,62 +69,70 @@ def execute_query(cursor, query, params):
 
 # Database Setup
 def init_db():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    if os.environ.get('DATABASE_URL'):
-        # PostgreSQL tables
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                id SERIAL PRIMARY KEY,
-                username TEXT NOT NULL UNIQUE,
-                password TEXT NOT NULL
-            )
-        ''')
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS energy_data (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER REFERENCES users(id),
-                date TEXT,
-                solar_energy REAL,
-                electric_energy REAL,
-                temperature REAL,
-                humidity REAL
-            )
-        ''')
-    else:
-        # SQLite tables
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT NOT NULL UNIQUE,
-                password TEXT NOT NULL
-            )
-        ''')
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS energy_data (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                date TEXT,
-                solar_energy REAL,
-                electric_energy REAL,
-                temperature REAL,
-                humidity REAL,
-                FOREIGN KEY (user_id) REFERENCES users (id)
-            )
-        ''')
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
         
-        # Check if temperature and humidity columns exist
-        cursor.execute("PRAGMA table_info(energy_data)")
-        columns = [column[1] for column in cursor.fetchall()]
+        if os.environ.get('DATABASE_URL'):
+            # PostgreSQL tables
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    id SERIAL PRIMARY KEY,
+                    username TEXT NOT NULL UNIQUE,
+                    password TEXT NOT NULL
+                )
+            ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS energy_data (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER REFERENCES users(id),
+                    date TEXT,
+                    solar_energy REAL,
+                    electric_energy REAL,
+                    temperature REAL,
+                    humidity REAL
+                )
+            ''')
+        else:
+            # SQLite tables
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT NOT NULL UNIQUE,
+                    password TEXT NOT NULL
+                )
+            ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS energy_data (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    date TEXT,
+                    solar_energy REAL,
+                    electric_energy REAL,
+                    temperature REAL,
+                    humidity REAL,
+                    FOREIGN KEY (user_id) REFERENCES users (id)
+                )
+            ''')
+            
+            # Check if temperature and humidity columns exist
+            cursor.execute("PRAGMA table_info(energy_data)")
+            columns = [column[1] for column in cursor.fetchall()]
+            
+            if 'temperature' not in columns:
+                cursor.execute("ALTER TABLE energy_data ADD COLUMN temperature REAL DEFAULT 25")
+            if 'humidity' not in columns:
+                cursor.execute("ALTER TABLE energy_data ADD COLUMN humidity REAL DEFAULT 60")
         
-        if 'temperature' not in columns:
-            cursor.execute("ALTER TABLE energy_data ADD COLUMN temperature REAL DEFAULT 25")
-        if 'humidity' not in columns:
-            cursor.execute("ALTER TABLE energy_data ADD COLUMN humidity REAL DEFAULT 60")
-    
-    conn.commit()
-    conn.close()
+        conn.commit()
+        logger.info("Database tables initialized successfully")
+        
+    except Exception as e:
+        logger.error(f"Error initializing database: {str(e)}")
+        raise
+    finally:
+        if conn:
+            conn.close()
 
 # Index Route
 @app.route('/')
@@ -578,5 +589,4 @@ def get_geolocation():
         return jsonify({'status': 'fail', 'message': str(e)}), 500
 
 if __name__ == '__main__':
-    init_db()
     app.run()
